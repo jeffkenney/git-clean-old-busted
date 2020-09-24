@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+set -e
+
+if [[ "${OSTYPE}" =~ ^darwin ]]; then
+  threshold_date=$(date -j -v '-30d' '+%s')
+else
+  threshold_date=$(date --date='30 days ago' '+%s')
+fi
+
+format='branch=%(refname:lstrip=2);'
+format="${format} current=%(if)%(HEAD)%(then)true%(else)false%(end);"
+format="${format} has_upstream=%(if)%(upstream:lstrip=2)%(then)true%(else)false%(end);"
+format="${format} upstream_gone=%(if:equals=[gone])%(upstream:track)%(then)true%(else)false%(end);"
+format="${format} commit_date=%(committerdate:unix);"
+
+git fetch --prune
+
+readarray -t lines <<< $(git for-each-ref --shell --format="${format}" refs/heads)
+
+for line in "${lines[@]}"; do
+  # skip blank lines
+  if [[ -z "${line}" ]]; then
+    continue;
+  fi
+
+  eval "${line}"
+
+  # ignore all branches with a commit since threshold_date
+  if [[ "${commit_date}" -ge "${threshold_date}" ]]; then
+    continue
+  fi
+
+  # ignore the current branch
+  if [[ "${current}" == 'true' ]]; then
+    continue
+  fi
+
+  # the branch has an upstream branch defined and that upstream branch exists
+  if [[ "${has_upstream}" == 'true' && "${upstream_gone}" == 'false' ]]; then
+    continue
+  fi
+
+  # the branch has no upstream branch defined, or the upstream branch does not exist
+  git branch -D "${branch}"
+done
+
+echo ''
+git prune
